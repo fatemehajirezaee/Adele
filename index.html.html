@@ -1,0 +1,363 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>بازی آموزش واکسیناسیون</title>
+    <style>
+        body {
+            font-family: 'Vazirmatn', Arial, sans-serif;
+            background-color: #f0f4f8;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            direction: rtl;
+        }
+        .container {
+            max-width: 800px;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .page {
+            display: none;
+        }
+        .page.active {
+            display: block;
+            animation: fadeIn 0.5s;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .avatar {
+            font-size: 50px;
+            transition: transform 0.3s;
+        }
+        .avatar.correct { transform: scale(1.2); }
+        .avatar.wrong { transform: scale(0.8); }
+        .progress-bar {
+            width: 100%;
+            height: 10px;
+            background: #ddd;
+            border-radius: 5px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress {
+            height: 100%;
+            background: #4caf50;
+            width: 100%;
+            transition: width 20s linear;
+        }
+        button {
+            background: #4caf50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .options button {
+            display: block;
+            width: 80%;
+            margin: 10px auto;
+        }
+        .leaderboard table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        .leaderboard th, .leaderboard td {
+            border: 1px solid #ddd;
+            padding: 8px;
+        }
+        @media (max-width: 600px) {
+            .container {
+                padding: 10px;
+            }
+            .avatar {
+                font-size: 40px;
+            }
+            .options button {
+                width: 90%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- صفحه شروع -->
+        <div id="startPage" class="page">
+            <h1>بازی آموزش واکسیناسیون</h1>
+            <p>نام خود را وارد کنید:</p>
+            <input type="text" id="playerName" placeholder="نام شما">
+            <p id="previousScore"></p>
+            <button onclick="startGame()">شروع بازی</button>
+        </div>
+
+        <!-- صفحه بازی -->
+        <div id="gamePage" class="page">
+            <div class="avatar">😊</div>
+            <div>سکه‌ها: <span id="coins">0</span> 🪙</div>
+            <div class="progress-bar">
+                <div class="progress" id="progress"></div>
+            </div>
+            <h2 id="question"></h2>
+            <div class="options" id="options"></div>
+            <div id="feedback"></div>
+        </div>
+
+        <!-- صفحه پایان -->
+        <div id="endPage" class="page">
+            <h1>پایان بازی</h1>
+            <p>امتیاز شما: <span id="finalScore"></span> 🪙</p>
+            <p id="comparison"></p>
+            <h2>لیدربورد</h2>
+            <div class="leaderboard">
+                <table>
+                    <tr>
+                        <th>نام</th>
+                        <th>سکه‌ها</th>
+                        <th>درست</th>
+                        <th>غلط</th>
+                        <th>سوالات باقی‌مانده</th>
+                    </tr>
+                    <tbody id="leaderboard"></tbody>
+                </table>
+            </div>
+            <button onclick="restartGame()">بازی دوباره</button>
+        </div>
+    </div>
+
+    <script>
+        const questions = [
+            // سطح آسان
+            { question: "واکسن سرخک در چه سنی تزریق می‌شود؟", options: ["6 ماهگی", "12 ماهگی", "18 ماهگی"], answer: "12 ماهگی", level: "easy" },
+            { question: "واکسن فلج اطفال چند نوبت است؟", options: ["2 نوبت", "4 نوبت", "6 نوبت"], answer: "4 نوبت", level: "easy" },
+            { question: "واکسن هپاتیت B برای چه سنی است؟", options: ["بدوتولد", "2 سالگی", "5 سالگی"], answer: "بدوتولد", level: "easy" },
+            { question: "واکسن BCG برای پیشگیری از چیست؟", options: ["سل", "هپاتیت", "دیفتری"], answer: "سل", level: "easy" },
+            // سطح متوسط
+            { question: "واکسن سه‌گانه شامل چه بیماری‌هایی است؟", options: ["دیفتری، کزاز، سیاه‌سرفه", "سرخک، اوریون، سرخجه", "هپاتیت، سل، فلج اطفال"], answer: "دیفتری، کزاز، سیاه‌سرفه", level: "medium" },
+            { question: "واکسن MMR در چه سنی تزریق می‌شود؟", options: ["12 و 18 ماهگی", "6 و 12 ماهگی", "2 و 4 سالگی"], answer: "12 و 18 ماهگی", level: "medium" },
+            { question: "واکسن کزاز برای بزرگسالان هر چند سال تکرار می‌شود؟", options: ["5 سال", "10 سال", "15 سال"], answer: "10 سال", level: "medium" },
+            // سطح سخت
+            { question: "واکسن مننژیت در ایران اجباری است؟", options: ["بله", "خیر", "فقط برای سربازان"], answer: "فقط برای سربازان", level: "hard" },
+            { question: "واکسن Hib از چه سنی شروع می‌شود؟", options: ["2 ماهگی", "6 ماهگی", "12 ماهگی"], answer: "2 ماهگی", level: "hard" },
+            { question: "واکسن روتاویروس در ایران چگونه است؟", options: ["اجباری", "اختیاری", "وجود ندارد"], answer: "وجود ندارد", level: "hard" }
+        ];
+
+        let currentQuestion = 0;
+        let coins = 0;
+        let correctAnswers = 0;
+        let wrongAnswers = 0;
+        let playerName = "";
+        let currentLevel = "easy";
+        let timer;
+        let remainingQuestions = 10;
+
+        function showPage(pageId) {
+            document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
+            document.getElementById(pageId).classList.add('active');
+        }
+
+        function startGame() {
+            playerName = document.getElementById('playerName').value || "بازیکن";
+            showPreviousScore();
+            showPage('gamePage');
+            loadQuestion();
+        }
+
+        function showPreviousScore() {
+            const previous = JSON.parse(localStorage.getItem('leaderboard')) || [];
+            const playerData = previous.find(p => p.name === playerName);
+            if (playerData) {
+                document.getElementById('previousScore').innerText = `بهترین امتیاز قبلی: ${playerData.coins} 🪙`;
+            }
+        }
+
+        function loadQuestion() {
+            if (remainingQuestions <= 0 || currentQuestion >= questions.length) {
+                endGame();
+                return;
+            }
+
+            const availableQuestions = questions.filter(q => !q.used && q.level === currentLevel);
+            if (availableQuestions.length === 0) {
+                currentLevel = currentLevel === "hard" ? "medium" : currentLevel === "medium" ? "easy" : "hard";
+                loadQuestion();
+                return;
+            }
+
+            const question = availableQuestions[Math.floor(Math.random() * availableQuestions.length)];
+            question.used = true;
+            document.getElementById('question').innerText = question.question;
+            const optionsDiv = document.getElementById('options');
+            optionsDiv.innerHTML = '';
+            question.options.forEach(option => {
+                const button = document.createElement('button');
+                button.innerText = option;
+                button.onclick = () => checkAnswer(option, question.answer);
+                optionsDiv.appendChild(button);
+            });
+            document.getElementById('coins').innerText = coins;
+            startTimer();
+        }
+
+        function startTimer() {
+            let timeLeft = 20;
+            const progress = document.getElementById('progress');
+            progress.style.width = '100%';
+            progress.style.transition = `width ${timeLeft}s linear`;
+            setTimeout(() => progress.style.width = '0%', 10);
+            timer = setInterval(() => {
+                timeLeft--;
+                if (timeLeft <= 0) {
+                    clearInterval(timer);
+                    checkAnswer(null, questions.find(q => q.question === document.getElementById('question').innerText).answer);
+                }
+            }, 1000);
+        }
+
+        function checkAnswer(selected, correct) {
+            clearInterval(timer);
+            const avatar = document.querySelector('.avatar');
+            const feedback = document.getElementById('feedback');
+            if (selected === correct) {
+                coins++;
+                correctAnswers++;
+                avatar.classList.add('correct');
+                feedback.innerText = "درست!";
+                currentLevel = currentLevel === "easy" ? "medium" : currentLevel === "medium" ? "hard" : "hard";
+            } else {
+                wrongAnswers++;
+                avatar.classList.add('wrong');
+                feedback.innerText = `غلط! پاسخ صحیح: ${correct}`;
+                currentLevel = currentLevel === "hard" ? "medium" : currentLevel === "medium" ? "easy" : "easy";
+            }
+            setTimeout(() => {
+                avatar.classList.remove('correct', 'wrong');
+                feedback.innerText = '';
+                remainingQuestions--;
+                currentQuestion++;
+                loadQuestion();
+            }, 1500);
+        }
+
+        function endGame() {
+            showPage('endPage');
+            document.getElementById('finalScore').innerText = coins;
+            const previous = JSON.parse(localStorage.getItem('leaderboard')) || [];
+            const playerData = previous.find(p => p.name === playerName);
+            if (playerData) {
+                document.getElementById('comparison').innerText = coins > playerData.coins ? 
+                    `شما ${coins - playerData.coins} سکه بیشتر از قبل کسب کردید!` : 
+                    `امتیاز قبلی شما ${playerData.coins} سکه بود.`;
+            }
+            updateLeaderboard();
+        }
+
+        function updateLeaderboard() {
+            const leaderboard = JSON.parse(localStorage.getItem('leaderboard')) || [];
+            const playerIndex = leaderboard.findIndex(p => p.name === playerName);
+            const playerData = { name: playerName, coins, correct: correctAnswers, wrong: wrongAnswers, remaining: remainingQuestions };
+            if (playerIndex >= 0) {
+                if (coins > leaderboard[playerIndex].coins) {
+                    leaderboard[playerIndex] = playerData;
+                }
+            } else {
+                leaderboard.push(playerData);
+            }
+            leaderboard.sort((a, b) => b.coins - a.coins);
+            localStorage.setItem('leaderboard', JSON.stringify(leaderboard.slice(0, 5)));
+            displayLeaderboard();
+        }
+
+        function displayLeaderboard() {
+            const leaderboard = JSON.parse(localStorage.getItem('leaderboard')) || [];
+            const tbody = document.getElementById('leaderboard');
+            tbody.innerHTML = '';
+            leaderboard.forEach(player => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${player.name}</td>
+                    <td>${player.coins} 🪙</td>
+                    <td>${player.correct}</td>
+                    <td>${player.wrong}</td>
+                    <td>${player.remaining}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function restartGame() {
+            coins = 0;
+            correctAnswers = 0;
+            wrongAnswers = 0;
+            currentQuestion = 0;
+            remainingQuestions = 10;
+            currentLevel = "easy";
+            questions.forEach(q => q.used = false);
+            showPage('startPage');
+        }
+
+        // بارگذاری فونت Vazirmatn
+        const link = document.createElement('link');
+        link.href = 'https://cdn.jsdelivr.net/npm/vazirmatn@33.0.3/Vazirmatn-font-face.css';
+        link.rel = 'stylesheet';
+        document.head.appendChild(link);
+
+        // شروع بازی
+        showPage('startPage');
+        displayLeaderboard();
+    </script>
+</body>
+</html>
