@@ -1,0 +1,338 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>بازی آموزش واکسیناسیون</title>
+    <style>
+        body {
+            font-family: 'Vazirmatn', Arial, sans-serif;
+            background-color: #f0f4f8;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: auto;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            max-width: 600px;
+            width: 100%;
+        }
+        h1, h2 {
+            color: #2c3e50;
+        }
+        .avatar {
+            font-size: 50px;
+            transition: transform 0.3s ease;
+        }
+        .avatar.correct {
+            transform: scale(1.2);
+        }
+        .avatar.wrong {
+            transform: scale(0.8);
+        }
+        .question {
+            font-size: 1.2em;
+            margin: 20px 0;
+            animation: fadeIn 0.5s ease-in;
+        }
+        .options button {
+            display: block;
+            width: 80%;
+            margin: 10px auto;
+            padding: 10px;
+            font-size: 1em;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .options button:hover {
+            background-color: #2980b9;
+        }
+        .timer {
+            height: 10px;
+            background: #e0e0e0;
+            border-radius: 5px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .timer-bar {
+            height: 100%;
+            background: #27ae60;
+            width: 100%;
+            transition: width 20s linear;
+        }
+        .timer-bar.active {
+            width: 0;
+        }
+        .feedback {
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .correct { color: #27ae60; }
+        .wrong { color: #e74c3c; }
+        #leaderboard {
+            margin-top: 20px;
+            text-align: right;
+        }
+        #leaderboard table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        #leaderboard th, #leaderboard td {
+            border: 1px solid #ddd;
+            padding: 8px;
+        }
+        #start-btn, #restart-btn {
+            background-color: #e67e22;
+            padding: 10px 20px;
+            font-size: 1.1em;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @media (max-width: 600px) {
+            .container {
+                padding: 15px;
+                margin: 10px;
+            }
+            .question {
+                font-size: 1em;
+            }
+            .options button {
+                width: 90%;
+                font-size: 0.9em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container" id="start-screen">
+        <h1>بازی آموزش واکسیناسیون</h1>
+        <p>نام خود را وارد کنید:</p>
+        <input type="text" id="player-name" placeholder="نام شما">
+        <p id="previous-score"></p>
+        <button id="start-btn">شروع بازی</button>
+    </div>
+
+    <div class="container" id="game-screen" style="display: none;">
+        <div class="avatar">😊</div>
+        <p>سکه‌ها: <span id="coins">0</span> 🪙</p>
+        <p>سوالات باقی‌مانده: <span id="remaining">10</span></p>
+        <div class="question" id="question"></div>
+        <div class="options" id="options"></div>
+        <div class="timer"><div class="timer-bar" id="timer-bar"></div></div>
+        <div class="feedback" id="feedback"></div>
+    </div>
+
+    <div class="container" id="end-screen" style="display: none;">
+        <h1>پایان بازی</h1>
+        <p>امتیاز شما: <span id="final-coins"></span> 🪙</p>
+        <p id="comparison"></p>
+        <h2>لیدربورد</h2>
+        <div id="leaderboard"></div>
+        <button id="restart-btn">بازی دوباره</button>
+    </div>
+
+    <script>
+        const questions = [
+            // Easy
+            { question: "اولین واکسنی که نوزاد در بدو تولد دریافت می‌کند چیست؟", options: ["BCG + هپاتیت B + فلج اطفال", "MMR", "پنوموکوک"], answer: 0, difficulty: "easy", correctAnswer: "BCG + هپاتیت B + فلج اطفال" },
+            { question: "واکسن BCG علیه کدام بیماری ایمنی ایجاد می‌کند؟", options: ["سل", "سرخک", "هپاتیت B"], answer: 0, difficulty: "easy", correctAnswer: "سل" },
+            { question: "واکسن MMR در چه سنی تزریق می‌شود؟", options: ["12 و 18 ماهگی", "2 و 4 ماهگی", "6 ماهگی"], answer: 0, difficulty: "easy", correctAnswer: "12 و 18 ماهگی" },
+            // Medium
+            { question: "واکسن سه‌گانه (DTP) شامل محافظت در برابر چه بیماری‌هایی است؟", options: ["دیفتری، سیاه‌سرفه، کزاز", "سل، هپاتیت B، فلج اطفال", "سرخک، سرخجه، اوریون"], answer: 0, difficulty: "medium", correctAnswer: "دیفتری، سیاه‌سرفه، کزاز" },
+            { question: "سن تزریق نوبت اول واکسن پنج‌گانه چیست؟", options: ["دو ماهگی", "12 ماهگی", "بدو تولد"], answer: 0, difficulty: "medium", correctAnswer: "دو ماهگی" },
+            { question: "واکسن روتاویروس برای چه بیماری‌ای است؟", options: ["اسهال‌های ناشی از روتاویروس", "مننژیت", "کزاز"], answer: 0, difficulty: "medium", correctAnswer: "اسهال‌های ناشی از روتاویروس" },
+            { question: "واکسن پنوموکوک علیه چه عفونت‌هایی محافظت می‌دهد؟", options: ["مننژیت، پنومونی، اوتیت میانی", "هپاتیت B", "فلج اطفال"], answer: 0, difficulty: "medium", correctAnswer: "مننژیت، پنومونی، اوتیت میانی" },
+            // Hard
+            { question: "واکسن BCG در کجا تزریق می‌شود؟", options: ["بازوی چپ (داخل جلدی)", "عضله ران راست", "پشت بازو"], answer: 0, difficulty: "hard", correctAnswer: "بازوی چپ (داخل جلدی)" },
+            { question: "مقدار تزریق واکسن هپاتیت B چقدر است؟", options: ["0.5 میلی‌لیتر", "0.05 میلی‌لیتر", "1 میلی‌لیتر"], answer: 0, difficulty: "hard", correctAnswer: "0.5 میلی‌لیتر" },
+            { question: "چرا نباید واکسن را به عضله سرینی تزریق کرد؟", options: ["خطر آسیب به عصب سیاتیک", "جذب بالای واکسن", "درد کمتر"], answer: 0, difficulty: "hard", correctAnswer: "خطر آسیب به عصب سیاتیک" }
+        ];
+
+        let currentQuestionIndex = 0;
+        let coins = 0;
+        let correctAnswers = 0;
+        let wrongAnswers = 0;
+        let remainingQuestions = 10;
+        let currentDifficulty = "easy";
+        let playerName = "";
+        let timer;
+        let previousScore = 0;
+
+        const startScreen = document.getElementById("start-screen");
+        const gameScreen = document.getElementById("game-screen");
+        const endScreen = document.getElementById("end-screen");
+        const questionEl = document.getElementById("question");
+        const optionsEl = document.getElementById("options");
+        const coinsEl = document.getElementById("coins");
+        const remainingEl = document.getElementById("remaining");
+        const feedbackEl = document.getElementById("feedback");
+        const timerBar = document.getElementById("timer-bar");
+        const avatar = document.querySelector(".avatar");
+        const finalCoinsEl = document.getElementById("final-coins");
+        const comparisonEl = document.getElementById("comparison");
+        const leaderboardEl = document.getElementById("leaderboard");
+
+        document.getElementById("start-btn").addEventListener("click", startGame);
+        document.getElementById("restart-btn").addEventListener("click", () => location.reload());
+
+        function startGame() {
+            playerName = document.getElementById("player-name").value.trim();
+            if (!playerName) {
+                alert("لطفاً نام خود را وارد کنید!");
+                return;
+            }
+            const leaderboard = JSON.parse(localStorage.getItem("leaderboard") || "[]");
+            const player = leaderboard.find(p => p.name === playerName);
+            previousScore = player ? player.coins : 0;
+            document.getElementById("previous-score").innerText = previousScore ? `بهترین امتیاز قبلی: ${previousScore} 🪙` : "اولین بازی شما!";
+            startScreen.style.display = "none";
+            gameScreen.style.display = "block";
+            loadQuestion();
+        }
+
+        function loadQuestion() {
+            if (remainingQuestions <= 0) {
+                endGame();
+                return;
+            }
+            const availableQuestions = questions.filter(q => q.difficulty === currentDifficulty);
+            const randomIndex = Math.floor(Math.random() * availableQuestions.length);
+            currentQuestionIndex = questions.indexOf(availableQuestions[randomIndex]);
+            const q = questions[currentQuestionIndex];
+            questionEl.innerText = q.question;
+            optionsEl.innerHTML = "";
+            q.options.forEach((option, index) => {
+                const btn = document.createElement("button");
+                btn.innerText = option;
+                btn.addEventListener("click", () => checkAnswer(index));
+                optionsEl.appendChild(btn);
+            });
+            remainingEl.innerText = remainingQuestions;
+            startTimer();
+        }
+
+        function startTimer() {
+            timerBar.classList.add("active");
+            timer = setTimeout(() => {
+                checkAnswer(-1);
+            }, 20000);
+        }
+
+        function checkAnswer(selectedIndex) {
+            clearTimeout(timer);
+            timerBar.classList.remove("active");
+            const q = questions[currentQuestionIndex];
+            if (selectedIndex === q.answer) {
+                coins++;
+                correctAnswers++;
+                feedbackEl.classList.add("correct");
+                feedbackEl.innerText = "درست است!";
+                avatar.classList.add("correct");
+                setTimeout(() => avatar.classList.remove("correct"), 300);
+                coinsEl.innerText = coins;
+                currentDifficulty = currentDifficulty === "easy" ? "medium" : currentDifficulty === "medium" ? "hard" : "hard";
+            } else {
+                wrongAnswers++;
+                feedbackEl.classList.add("wrong");
+                feedbackEl.innerText = `غلط! پاسخ صحیح: ${q.correctAnswer}`;
+                avatar.classList.add("wrong");
+                setTimeout(() => avatar.classList.remove("wrong"), 300);
+                currentDifficulty = currentDifficulty === "hard" ? "medium" : currentDifficulty === "medium" ? "easy" : "easy";
+            }
+            remainingQuestions--;
+            setTimeout(() => {
+                feedbackEl.innerText = "";
+                feedbackEl.classList.remove("correct", "wrong");
+                loadQuestion();
+            }, 1000);
+        }
+
+        function endGame() {
+            gameScreen.style.display = "none";
+            endScreen.style.display = "block";
+            finalCoinsEl.innerText = coins;
+            comparisonEl.innerText = previousScore ? `امتیاز قبلی: ${previousScore} 🪙 | امتیاز فعلی: ${coins} 🪙` : "اولین بازی شما!";
+            updateLeaderboard();
+            showLeaderboard();
+        }
+
+        function updateLeaderboard() {
+            let leaderboard = JSON.parse(localStorage.getItem("leaderboard") || "[]");
+            const playerIndex = leaderboard.findIndex(p => p.name === playerName);
+            const playerData = { name: playerName, coins, correct: correctAnswers, wrong: wrongAnswers, remaining: remainingQuestions };
+            if (playerIndex >= 0) {
+                if (leaderboard[playerIndex].coins < coins) {
+                    leaderboard[playerIndex] = playerData;
+                }
+            } else {
+                leaderboard.push(playerData);
+            }
+            leaderboard.sort((a, b) => b.coins - a.coins);
+            leaderboard = leaderboard.slice(0, 5);
+            localStorage.setItem("leaderboard", JSON.stringify(leaderboard));
+        }
+
+        function showLeaderboard() {
+            const leaderboard = JSON.parse(localStorage.getItem("leaderboard") || "[]");
+            leaderboardEl.innerHTML = `
+                <table>
+                    <tr><th>نام</th><th>سکه‌ها</th><th>درست</th><th>غلط</th><th>باقی‌مانده</th></tr>
+                    ${leaderboard.map(p => `<tr><td>${p.name}</td><td>${p.coins} 🪙</td><td>${p.correct}</td><td>${p.wrong}</td><td>${p.remaining}</td></tr>`).join("")}
+                </table>
+            `;
+        }
+    </script>
+</body>
+</html>
